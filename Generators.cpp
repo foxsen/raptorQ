@@ -216,10 +216,10 @@ void Generators::_3_Matrix_GHDPC()
 	int i,j,k;
 
 	for (j=0; j< K1 + S - 1; j++) {
-		i = RandYim(j+1, 6, H);
-		A[S+i][j].val = 1;
-		i = (RandYim(j+1, 6, H) + RandYim(j+1, 7, H - 1) + 1) % H;
-		A[S+i][j].val = 1;
+		int a = RandYim(j+1, 6, H);
+		A[S+a][j].val = 1;
+		int b = (a + RandYim(j+1, 7, H - 1) + 1) % H;
+		A[S+b][j].val = 1;
 	}
 
 	for (i=S; i < S + H; i++) {
@@ -230,7 +230,7 @@ void Generators::_3_Matrix_GHDPC()
 		for (j=0; j < K1 + S; j++) {
 			unsigned char tmp = 0;
 			for (k=j; k < K1 + S; k++) 
-				if (A[i][k].val) tmp ^= octmul(A[i][k].val,OCT_EXP[k - j]); 
+				if (A[i][k].val) tmp ^= octmul(A[i][k].val,OCT_EXP[(k - j) % 255]);
 			A[i][j].val = tmp;
 		}
 	}
@@ -360,7 +360,7 @@ const TuplS Generators::Tupl(int X) {
 
 
 const unsigned int Generators::RandYim(unsigned int y, unsigned char i,unsigned int m) {
-	return (V0[((y & 0xff) +i) & 0xff] ^ V1[(((y>>8) & 0xff) + i) & 0xff] ^ V2[(((y>>16) & 0xff) + i) & 0xff] ^ V3[(((y>>24) & 0xff) + i) & 0xff]) % m;
+	return (V0[(y + i) & 0xff] ^ V1[((y>>8) + i) & 0xff] ^ V2[((y>>16) + i) & 0xff] ^ V3[((y>>24) + i) & 0xff]) % m;
 }
 
 
@@ -370,7 +370,7 @@ const unsigned int Generators::RandYim(unsigned int y, unsigned char i,unsigned 
  */
 const unsigned int Generators::Deg(unsigned int v) {
 	int j=0;
-	while( v > f[j])
+	while (v >= f[j])
 		j++;
 	return min(j, W - 2);
 }
