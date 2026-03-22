@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <sys/time.h>
 
 #include "Helper.h"
 #include "Symbol.h"
@@ -462,6 +463,315 @@ void test_roundtrip_K512() {
     ASSERT(roundtrip(512, 4, 12, lost, 5));
 }
 
+/* ── Bandwidth / throughput tests ──────────────────────────── */
+
+static double now_sec() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec + tv.tv_usec * 1e-6;
+}
+
+/*
+ * Measure encoding bandwidth: create K source symbols of size T,
+ * encode with overhead repair symbols, repeat for 'iterations' rounds.
+ * Reports MB/s of source data encoded.
+ */
+static void bench_encode(int K, int T, int overhead, int iterations) {
+    int i, j;
+
+    /* build source data */
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)((i * 7 + j * 3) & 0xFF);
+    }
+
+    double t0 = now_sec();
+
+    for (int iter = 0; iter < iterations; iter++) {
+        Encoder *enc = new Encoder();
+        enc->init(K, T);
+        Symbol **repairs = enc->encode(source, overhead);
+        if (repairs) {
+            for (i = 0; i < overhead; i++)
+                delete repairs[i];
+            delete[] repairs;
+        }
+        delete enc;
+    }
+
+    double elapsed = now_sec() - t0;
+    double total_bytes = (double)K * T * iterations;
+    double mbps = total_bytes / elapsed / (1024.0 * 1024.0);
+
+    cout << "    K=" << K << " T=" << T << " overhead=" << overhead
+         << " iters=" << iterations
+         << "  encode: " << mbps << " MB/s"
+         << " (" << elapsed << "s)" << endl;
+
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+/*
+ * Measure decoding bandwidth: encode, drop 'nlost' source symbols,
+ * decode and recover, repeat for 'iterations' rounds.
+ * Reports MB/s of source data decoded.
+ */
+static void bench_decode(int K, int T, int overhead, int nlost, int iterations) {
+    int i, j;
+
+    /* build source data */
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)((i * 7 + j * 3) & 0xFF);
+    }
+
+    /* deterministic lost indices: evenly spaced */
+    int *lost_indices = new int[nlost];
+    for (i = 0; i < nlost; i++)
+        lost_indices[i] = (i * K) / nlost;
+
+    /* pre-encode to get repair symbols for each iteration */
+    double t0 = now_sec();
+
+    for (int iter = 0; iter < iterations; iter++) {
+        /* encode */
+        Encoder *enc = new Encoder();
+        enc->init(K, T);
+        Symbol **repairs = enc->encode(source, overhead);
+
+        /* build received set */
+        int max_recv = K + overhead;
+        char **received = new char*[max_recv];
+        int *esi = new int[max_recv];
+        int n = 0;
+
+        for (i = 0; i < K; i++) {
+            bool is_lost = false;
+            for (j = 0; j < nlost; j++)
+                if (lost_indices[j] == i) { is_lost = true; break; }
+            if (!is_lost) {
+                received[n] = new char[T];
+                memcpy(received[n], source[i], T);
+                esi[n] = i;
+                n++;
+            }
+        }
+        for (i = 0; i < overhead; i++) {
+            received[n] = new char[T];
+            memcpy(received[n], repairs[i]->data, T);
+            esi[n] = K + i;
+            n++;
+            delete repairs[i];
+        }
+        delete[] repairs;
+        delete enc;
+
+        /* decode */
+        Decoder *dec = new Decoder();
+        dec->init(K, T);
+        dec->decode(received, n, esi);
+        for (i = 0; i < nlost; i++) {
+            Symbol *s = dec->recover(lost_indices[i]);
+            delete s;
+        }
+        delete dec;
+
+        for (i = 0; i < n; i++)
+            delete[] received[i];
+        delete[] received;
+        delete[] esi;
+    }
+
+    double elapsed = now_sec() - t0;
+    double total_bytes = (double)K * T * iterations;
+    double mbps = total_bytes / elapsed / (1024.0 * 1024.0);
+
+    cout << "    K=" << K << " T=" << T << " lost=" << nlost
+         << " overhead=" << overhead
+         << " iters=" << iterations
+         << "  encode+decode: " << mbps << " MB/s"
+         << " (" << elapsed << "s)" << endl;
+
+    delete[] lost_indices;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+/*
+ * Stream bandwidth test: simulate processing a large data stream by
+ * splitting it into blocks of K symbols each. Measures total throughput
+ * for both encoding and decoding pipelines.
+ */
+static void bench_stream(int K, int T, int overhead, int nlost,
+                          int total_data_kb) {
+    int i, j;
+    int block_bytes = K * T;
+    int nblocks = (total_data_kb * 1024 + block_bytes - 1) / block_bytes;
+    if (nblocks < 1) nblocks = 1;
+
+    char **source = new char*[K];
+    for (i = 0; i < K; i++)
+        source[i] = new char[T];
+
+    int *lost_indices = new int[nlost];
+    for (i = 0; i < nlost; i++)
+        lost_indices[i] = (i * K) / nlost;
+
+    /* --- Encoding pass --- */
+    double enc_t0 = now_sec();
+    for (int blk = 0; blk < nblocks; blk++) {
+        /* fill source with block-specific data */
+        for (i = 0; i < K; i++)
+            for (j = 0; j < T; j++)
+                source[i][j] = (char)((blk + i * 7 + j * 3) & 0xFF);
+
+        Encoder *enc = new Encoder();
+        enc->init(K, T);
+        Symbol **repairs = enc->encode(source, overhead);
+        if (repairs) {
+            for (i = 0; i < overhead; i++)
+                delete repairs[i];
+            delete[] repairs;
+        }
+        delete enc;
+    }
+    double enc_elapsed = now_sec() - enc_t0;
+
+    /* --- Decoding pass --- */
+    double dec_t0 = now_sec();
+    for (int blk = 0; blk < nblocks; blk++) {
+        for (i = 0; i < K; i++)
+            for (j = 0; j < T; j++)
+                source[i][j] = (char)((blk + i * 7 + j * 3) & 0xFF);
+
+        Encoder *enc = new Encoder();
+        enc->init(K, T);
+        Symbol **repairs = enc->encode(source, overhead);
+
+        int max_recv = K + overhead;
+        char **received = new char*[max_recv];
+        int *esi = new int[max_recv];
+        int n = 0;
+
+        for (i = 0; i < K; i++) {
+            bool is_lost = false;
+            for (j = 0; j < nlost; j++)
+                if (lost_indices[j] == i) { is_lost = true; break; }
+            if (!is_lost) {
+                received[n] = new char[T];
+                memcpy(received[n], source[i], T);
+                esi[n] = i;
+                n++;
+            }
+        }
+        for (i = 0; i < overhead; i++) {
+            received[n] = new char[T];
+            memcpy(received[n], repairs[i]->data, T);
+            esi[n] = K + i;
+            n++;
+            delete repairs[i];
+        }
+        delete[] repairs;
+        delete enc;
+
+        Decoder *dec = new Decoder();
+        dec->init(K, T);
+        dec->decode(received, n, esi);
+        for (i = 0; i < nlost; i++) {
+            Symbol *s = dec->recover(lost_indices[i]);
+            delete s;
+        }
+        delete dec;
+
+        for (i = 0; i < n; i++)
+            delete[] received[i];
+        delete[] received;
+        delete[] esi;
+    }
+    double dec_elapsed = now_sec() - dec_t0;
+
+    double total_bytes = (double)nblocks * block_bytes;
+    double enc_mbps = total_bytes / enc_elapsed / (1024.0 * 1024.0);
+    double dec_mbps = total_bytes / dec_elapsed / (1024.0 * 1024.0);
+
+    cout << "    stream " << total_data_kb << "KB"
+         << " (K=" << K << " T=" << T << " blocks=" << nblocks
+         << " loss=" << nlost << "/" << K << ")"
+         << "  encode: " << enc_mbps << " MB/s"
+         << "  decode: " << dec_mbps << " MB/s" << endl;
+
+    delete[] lost_indices;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+void test_bandwidth_encode_small() {
+    cout << endl << "  Encoding throughput:" << endl;
+    bench_encode(8, 4, 4, 500);
+    bench_encode(8, 64, 4, 500);
+    bench_encode(8, 256, 4, 500);
+    bench_encode(8, 1024, 4, 200);
+}
+
+void test_bandwidth_encode_medium() {
+    bench_encode(50, 64, 10, 100);
+    bench_encode(50, 256, 10, 100);
+    bench_encode(50, 1024, 10, 50);
+}
+
+void test_bandwidth_encode_large() {
+    bench_encode(100, 256, 15, 50);
+    bench_encode(100, 1024, 15, 20);
+    bench_encode(256, 1024, 20, 10);
+}
+
+void test_bandwidth_decode_small() {
+    cout << endl << "  Encode+Decode throughput:" << endl;
+    bench_decode(8, 4, 4, 1, 500);
+    bench_decode(8, 64, 4, 1, 500);
+    bench_decode(8, 256, 4, 2, 500);
+    bench_decode(8, 1024, 4, 2, 200);
+}
+
+void test_bandwidth_decode_medium() {
+    bench_decode(50, 64, 10, 5, 100);
+    bench_decode(50, 256, 10, 5, 100);
+    bench_decode(50, 1024, 10, 5, 50);
+}
+
+void test_bandwidth_decode_large() {
+    bench_decode(100, 256, 15, 10, 50);
+    bench_decode(100, 1024, 15, 10, 20);
+    bench_decode(256, 1024, 20, 25, 10);
+}
+
+void test_bandwidth_stream_small() {
+    cout << endl << "  Stream throughput (split data into FEC blocks):" << endl;
+    /* 64KB stream with small symbols */
+    bench_stream(8, 64, 4, 1, 64);
+    bench_stream(8, 256, 4, 1, 64);
+}
+
+void test_bandwidth_stream_medium() {
+    /* 256KB stream with medium blocks */
+    bench_stream(50, 256, 10, 5, 256);
+    bench_stream(50, 1024, 10, 5, 256);
+}
+
+void test_bandwidth_stream_large() {
+    /* 1MB stream with larger blocks */
+    bench_stream(100, 1024, 15, 10, 1024);
+    bench_stream(256, 1024, 20, 25, 1024);
+}
+
 /* ── Main ──────────────────────────────────────────────────── */
 
 int main()
@@ -512,6 +822,17 @@ int main()
     TEST(test_roundtrip_K50);
     TEST(test_roundtrip_K100);
     TEST(test_roundtrip_K512);
+
+    cout << endl << "=== Bandwidth tests ===" << endl;
+    TEST(test_bandwidth_encode_small);
+    TEST(test_bandwidth_encode_medium);
+    TEST(test_bandwidth_encode_large);
+    TEST(test_bandwidth_decode_small);
+    TEST(test_bandwidth_decode_medium);
+    TEST(test_bandwidth_decode_large);
+    TEST(test_bandwidth_stream_small);
+    TEST(test_bandwidth_stream_medium);
+    TEST(test_bandwidth_stream_large);
 
     cout << endl << "================================" << endl;
     cout << tests_run << " tests: "
