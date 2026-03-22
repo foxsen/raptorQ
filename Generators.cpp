@@ -86,9 +86,11 @@ bool Generators::_0_init(int _K, int _N, int _T) {
 
 	//P1 be the smallest prime that is greater than or equal to P
 	int _P1_len = P;
+	if (_P1_len < 2) _P1_len = 2;
 	int flag = false;
 	while(!flag)
-	{		
+	{
+		flag = true;
 		for(i = 2; i <= sqrt((double)_P1_len); i++)
 		{
 			if(_P1_len % i == 0)
@@ -97,8 +99,6 @@ bool Generators::_0_init(int _K, int _N, int _T) {
 				flag = false;
 				break;
 			}
-			else
-				flag = true;
 		}
 	}
 
@@ -393,7 +393,7 @@ bool Generators::prepare(char **source, int _N, int *_esi) {
 	int i,j;
 
 	if (_N < K) {
-		cout << "Invalid N in prepare!" << N << endl;
+		cout << "Invalid N in prepare!" << _N << endl;
 		return false;
 	}
 
@@ -746,8 +746,8 @@ retry:
 		index = M; o = L; r = L;
 		for (i = _I; i < M; i ++) {
 			if ((gtone_start || (gtone_start==0 && degree[i].gtone==0)) && degree[i].curr > 0 && degree[i].curr <= r) {
-				index = i; 
 				if (degree[i].curr < r || (degree[i].curr == r && degree[i].ori < o)) {
+					index = i;
 					o = degree[i].ori;
 					r = degree[i].curr;
 				}
@@ -755,7 +755,7 @@ retry:
 		}
 
 		if (index == M) {
-		    if (gtone_start) goto retry;
+		    if (!gtone_start) { gtone_start = 1; goto retry; }
 			cout << "Cannot find enough rows to decode" << endl;
 			PrintMatrix();
 			return NULL;
@@ -1009,24 +1009,42 @@ void Generators::ToString() {
 
 Generators::Generators() {
 	status = 0;
+	M = 0;
+	L = 0;
+	C1 = NULL;
+	C = NULL;
+	A = NULL;
+	Abak = NULL;
+	Tuples = NULL;
+	R = NULL;
+	isi = NULL;
+	degree = NULL;
 }
 
 Generators::~Generators() {
 	int i;
-	for (i=0; i< M; i++)
-		delete C1[i];
-	delete[] C1;
+	if (C1) {
+		for (i=0; i< M; i++)
+			delete C1[i];
+		delete[] C1;
+	}
 
-	for (i=0; i < M ;i++)
-		delete []A[i];
-	delete []A;
-	for (i=0; i < M ;i++)
-		delete []Abak[i];
-	delete []Abak;
+	if (A) {
+		for (i=0; i < M ;i++)
+			delete []A[i];
+		delete []A;
+	}
+	if (Abak) {
+		for (i=0; i < M ;i++)
+			delete []Abak[i];
+		delete []Abak;
+	}
 	delete[] Tuples;
-	for (i=0; i < L; i++)
-		delete C[i];
-	delete[] C;
+	if (C) {
+		for (i=0; i < L; i++)
+			delete C[i];
+		delete[] C;
+	}
 	// caller handle the delete of R
 	//delete[] R;
 	delete[] isi;

@@ -1,4 +1,3 @@
-#pragma once
 #include "Helper.h"
 #include "Symbol.h"
 

@@ -216,12 +216,11 @@ int main(int argc, char* argv[]) {
 		delete[] received[i];
 	delete[] received;
  
-	/* handled in generator. the primciple is that consumer handle the free of memories */
-	//delete[] esi;
-	delete[] lost;	
+	/* esi is our own allocation, not managed by generator */
+	delete[] esi;
+	delete[] lost;
 
-	while(true);
-	
+
 #endif
 
 

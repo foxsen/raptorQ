@@ -18,7 +18,7 @@ Symbol::Symbol(void)
 Symbol::Symbol(unsigned int size)
 {
 	if (size % sizeof(int) != 0) {
-		cout << "size must be a multiple of %d bytes" << endl;
+		cout << "size must be a multiple of " << sizeof(int) << " bytes" << endl;
 	}
 
 	data = new int[size/sizeof(int)];
@@ -37,7 +37,7 @@ void Symbol::init(int size)
 	if (nbytes != size) {
 		if (data) delete[] data;
 		if (size % sizeof(int) != 0) {
-			cout << "size must be a multiple of %d bytes" << endl;
+			cout << "size must be a multiple of " << sizeof(int) << " bytes" << endl;
 		}
 		nbytes = size;
 		data = new int[size/sizeof(int)];
@@ -59,7 +59,7 @@ void Symbol::print(void)
 {
 	int i;
 	
-	for (i=0; i< nbytes; i++) 
+	for (i=0; i< nbytes/sizeof(int); i++)
 	{
 		cout << data[i] << " ";
 	}

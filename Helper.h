@@ -67,7 +67,9 @@ public:
 };
 
 const static long Combin(int m, int n) {
-	if (n==1||n==0) 
+	if (n==0)
+		return 1;
+	if (n==1)
 		return m;
 	if (n > m-n) {
 		return Combin(m, m-n);

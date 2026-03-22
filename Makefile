@@ -1,9 +1,11 @@
-ALL: main 
-.PHONY: ALL clean libraptor
+ALL: main
+.PHONY: ALL clean libraptor tests
 
 CC = g++
-LDFLAGS ?= 
+LDFLAGS ?=
 CFLAGS += -fPIC -O2
+
+LIB_OBJS = Decoder.o Encoder.o Generators.o Helper.o StdAfx.o Symbol.o
 
 Decoder.o: Decoder.cpp Decoder.h
 	$(CC)  Decoder.cpp -o Decoder.o -c $(CFLAGS)
@@ -19,13 +21,22 @@ StdAfx.o: StdAfx.cpp StdAfx.h
 	$(CC) StdAfx.cpp -o StdAfx.o -c $(CFLAGS)
 Symbol.o: Symbol.cpp Symbol.h
 	$(CC) Symbol.cpp -o Symbol.o -c $(CFLAGS)
-main: Decoder.o Encoder.o Generators.o Helper.o Main.o StdAfx.o Symbol.o
-	$(CC) Decoder.o Encoder.o Generators.o Helper.o Main.o StdAfx.o Symbol.o -o main
+test.o: test.cpp
+	$(CC) test.cpp -o test.o -c $(CFLAGS)
+
+main: $(LIB_OBJS) Main.o
+	$(CC) $(LIB_OBJS) Main.o -o main
+
+test_runner: $(LIB_OBJS) test.o
+	$(CC) $(LIB_OBJS) test.o -o test_runner
+
+tests: test_runner
+	./test_runner
 
 libraptorq: libraptorq.a
 libraptorq.a: Decoder.o Encoder.o Generators.o Helper.o Symbol.o
 	ar rcs libraptorq.a $^
-#	$(CC) -shared -o $@ $^ $(LDFLAGS) 
+#	$(CC) -shared -o $@ $^ $(LDFLAGS)
 
 clean:
-	rm -f *.o main libraptorq.so libraptorq.a libraptor.dll 
+	rm -f *.o main test_runner libraptorq.so libraptorq.a libraptor.dll
