@@ -74,6 +74,7 @@ private:
 	int N;  //received symbol number; set to K1 for encoder 
 	int N1; //received symbol plus extended one
 	int M;  //N+S+H
+	int M_alloc; // allocated row count for A/Abak/C1/degree
 	TuplS *Tuples; //Tuples list
 	int tupl_len;
 	Symbol **C1; // size M: S+H zero + N symbols
@@ -89,6 +90,10 @@ private:
 	Degree *degree; //number of 1 in row i
 	int dgh; // degree list head
 	int *isi; //Encoding Symbol ID list
+	int *gauss_HI;  // pre-allocated work arrays for gaussian_elimination
+	int *gauss_LOW;
+	int gauss_HI_size;
+	int gauss_LOW_size;
 	int status; /* 1: para inited, 2: source filled 3: intermediate generated 4: repair generated */
 
 public:

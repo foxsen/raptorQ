@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "Symbol.h"
+#include "Tables.h"
 #include "Generators.h"
 
 using namespace std;
@@ -108,9 +109,10 @@ void Symbol::mul(unsigned char u)
 {
 	int i;
 	unsigned char *p = (unsigned char*)data;
+	const unsigned char *mul_row = OCT_MUL[u];
 
 	for (i=0;i<nbytes; i++)
-		p[i] = octmul(p[i],u);
+		p[i] = mul_row[p[i]];
 }
 
 void Symbol::div(unsigned char u)
@@ -118,23 +120,31 @@ void Symbol::div(unsigned char u)
 	int i;
 	unsigned char *p = (unsigned char*)data;
 
+	if (u == 1) return;
+	/* compute multiplicative inverse: u^(-1) = exp(255 - log(u)) */
+	unsigned char inv = OCT_EXP[255 - OCT_LOG[u]];
+	const unsigned char *mul_row = OCT_MUL[inv];
+
 	for (i=0;i<nbytes; i++)
-		p[i] = octdiv(p[i],u);
+		p[i] = mul_row[p[i]];
 }
 
 void Symbol::muladd(Symbol *s, unsigned char u)
 {
 	int i;
-	unsigned char *p, *p1;
 
-	if (nbytes != s->nbytes) 
+	if (nbytes != s->nbytes)
 		cout << "Error! try to muladd symbols with unmatched size" << endl;
 
-	p = (unsigned char*)data;
-	p1 = (unsigned char*)s->data;
-
-	for (i=0;i<nbytes; i++) {
-		if (u==1) p[i] ^= p1[i];
-		else p[i] ^= octmul(p1[i],u);
+	if (u == 1) {
+		/* XOR path: process 4 bytes at a time */
+		for (i = 0; i < nbytes/4; i++)
+			data[i] ^= s->data[i];
+	} else {
+		unsigned char *p = (unsigned char*)data;
+		unsigned char *p1 = (unsigned char*)s->data;
+		const unsigned char *mul_row = OCT_MUL[u];
+		for (i = 0; i < nbytes; i++)
+			p[i] ^= mul_row[p1[i]];
 	}
 }

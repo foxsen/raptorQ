@@ -1,6 +1,7 @@
 
 #include "Helper.h"
 #include "Symbol.h"
+#define OCT_MUL_DEFINITION
 #include "Tables.h"
 #include "stdlib.h"
 
@@ -38,7 +39,9 @@ bool Generators::gen(int _K, int _N, int _T) {
 	}
 	status = 1;
 
+#ifdef DEBUG
 	ToString();
+#endif
 
 	//while(true);
 
@@ -125,6 +128,8 @@ bool Generators::_0_init(int _K, int _N, int _T) {
 		Abak = new Elem*[M];
 		for(i = 0; i < (M); i++)
 			Abak[i] = new Elem[L];
+
+		M_alloc = M;
 
 
 		for( i = 0; i < (M); i++)
@@ -229,7 +234,7 @@ void Generators::_3_Matrix_GHDPC()
 	for (i=S; i< S + H; i++) {
 		for (j=0; j < K1 + S; j++) {
 			unsigned char tmp = 0;
-			for (k=j; k < K1 + S; k++) 
+			for (k=j; k < K1 + S; k++)
 				if (A[i][k].val) tmp ^= octmul(A[i][k].val,OCT_EXP[(k - j) % 255]);
 			A[i][j].val = tmp;
 		}
@@ -370,7 +375,7 @@ const unsigned int Generators::RandYim(unsigned int y, unsigned char i,unsigned 
  */
 const unsigned int Generators::Deg(unsigned int v) {
 	int j=0;
-	while (v >= f[j])
+	while( v >= f[j])
 		j++;
 	return min(j, W - 2);
 }
@@ -414,17 +419,18 @@ bool Generators::prepare(char **source, int _N, int *_esi) {
 		/* only decoder will provide esi(for each source block) */
 		if (_esi) {
 			int _N1 = _N + K1 - K;
+			int newM = _N1 + S + H;
 
-			/* maxtrix LT parts changed, the data struct is not efficent now */
-			for (i=0; i < M ;i++)
+			/* reallocate matrices for new size */
+			for (i=0; i < M_alloc ;i++)
 				delete []A[i];
 			delete []A;
 
-			A = new Elem*[_N1 + S + H];
-			for(i = 0; i < (_N1 + S + H); i++)
+			A = new Elem*[newM];
+			for(i = 0; i < newM; i++)
 				A[i] = new Elem[L];
 
-			for(i = 0; i < (_N1 + S + H); i++)
+			for(i = 0; i < newM; i++)
 			{
 				for(j = 0; j < (L); j++)
 					if (i < S + H)
@@ -433,42 +439,40 @@ bool Generators::prepare(char **source, int _N, int *_esi) {
 						A[i][j].val = 0;
 			}
 
-			for (i=0; i < M ;i++)
+			for (i=0; i < M_alloc ;i++)
 				delete []Abak[i];
 			delete []Abak;
 
-			Abak = new Elem*[_N1 + S + H];
-			for(i = 0; i < (_N1 + S + H); i++)
+			Abak = new Elem*[newM];
+			for(i = 0; i < newM; i++)
 				Abak[i] = new Elem[L];
 
-			for(i = 0; i < (_N1 + S + H); i++)
+			for(i = 0; i < newM; i++)
 			{
 				for(j = 0; j < (L); j++)
 					if (i < S + H)
 						Abak[i][j] = A[i][j];
 					else
 						Abak[i][j].val = 0;
-
 			}
 
-
 			delete[] degree;
-			degree = new Degree[_N1 + S + H];
-			
-			for (i = 0; i < M; i++)
+			degree = new Degree[newM];
+
+			for (i = 0; i < M_alloc; i++)
 				delete C1[i];
 			delete[] C1;
 
-			this->C1 = new Symbol*[_N1 + S + H];
-			for (i = 0; i < _N1 + S + H; i++)
-				C1[i] = new Symbol(T); 
+			C1 = new Symbol*[newM];
+			for (i = 0; i < newM; i++)
+				C1[i] = new Symbol(T);
 
-			M = _N1 + S + H;
+			M_alloc = newM;
+			M = newM;
 			N = _N;
 			N1 = _N1;
 
 			delete[] isi;
-
 			isi = new int[N1];
 
 			for (i = 0; i < N; i++) {
@@ -565,8 +569,19 @@ int Generators::gaussian_elimination(int starti, int startj)
 	int i, k, q, jj, kk;
 	int firstone;
 
-	int* HI  = new int[L];
-	int* LOW = new int[M];	
+	/* reuse pre-allocated work arrays, growing if needed */
+	if (gauss_HI_size < L) {
+		delete[] gauss_HI;
+		gauss_HI = new int[L];
+		gauss_HI_size = L;
+	}
+	if (gauss_LOW_size < M) {
+		delete[] gauss_LOW;
+		gauss_LOW = new int[M];
+		gauss_LOW_size = M;
+	}
+	int* HI  = gauss_HI;
+	int* LOW = gauss_LOW;
 		
 	for (jj=startj; jj<L; jj++)
 	{
@@ -595,8 +610,6 @@ int Generators::gaussian_elimination(int starti, int startj)
 		
 		if (kk==0){
 			cout << " Encoder: due to unclear reasons the process can not continue" << endl;
-			delete[] HI;
-			delete[] LOW;
 			return 0;
 		}
 		
@@ -728,7 +741,9 @@ Symbol ** Generators::generate_intermediates(void)
 		degree[i].gtone = gtone; 
 	}
 
+#ifdef DEBUG
 	PrintMatrix();
+#endif
 
 	/* step 1 */
 	int _I, _U, r;
@@ -844,8 +859,10 @@ retry:
 	delete[] cols1;
 	delete[] cols2;
 
+#ifdef DEBUG
 	cout << "_I=" << _I << "_U=" << _U << endl;
 	//PrintMatrix();
+#endif
 
 /* step 2 */
 //gaussian elimination on the (M - _I) x _U matrix
@@ -976,19 +993,20 @@ void Generators::PrintMatrix(void)
 }
 
 void Generators::ToString() {
-	cout << "K=" << K << endl; 
-	cout << "T=" << T << endl; 
-	cout << "H=" << H << endl; 
-	cout << "S=" << S << endl; 
-	cout << "L=" << L << endl; 
-	cout << "N=" << N << endl; 
-	cout << "M=" << M << endl; 
-	cout << "K1=" << K1 << endl; 
-	cout << "W=" << W << endl; 
-	cout << "P=" << P << endl; 
-	cout << "B=" << B << endl; 
-	cout << "U=" << U << endl; 
-	cout << "P1=" << P1 << endl; 
+#ifdef DEBUG
+	cout << "K=" << K << endl;
+	cout << "T=" << T << endl;
+	cout << "H=" << H << endl;
+	cout << "S=" << S << endl;
+	cout << "L=" << L << endl;
+	cout << "N=" << N << endl;
+	cout << "M=" << M << endl;
+	cout << "K1=" << K1 << endl;
+	cout << "W=" << W << endl;
+	cout << "P=" << P << endl;
+	cout << "B=" << B << endl;
+	cout << "U=" << U << endl;
+	cout << "P1=" << P1 << endl;
 
 
 	cout <<"Tuples:" << endl;
@@ -1000,16 +1018,18 @@ void Generators::ToString() {
 
 	cout<<"The generation maxtrix:" << endl;
 	for (int i=0; i < M ;i++) {
-		for (int j=0; j < L;j++) 
+		for (int j=0; j < L;j++)
 			printf("%2x ", A[i][j].val);
 			//cout<<A[i][j].val<<" ";
 		cout<<endl;
 	}
+#endif
 }
 
 Generators::Generators() {
 	status = 0;
 	M = 0;
+	M_alloc = 0;
 	L = 0;
 	C1 = NULL;
 	C = NULL;
@@ -1019,23 +1039,28 @@ Generators::Generators() {
 	R = NULL;
 	isi = NULL;
 	degree = NULL;
+	gauss_HI = NULL;
+	gauss_LOW = NULL;
+	gauss_HI_size = 0;
+	gauss_LOW_size = 0;
 }
 
 Generators::~Generators() {
 	int i;
+	int rows = M_alloc > M ? M_alloc : M;
 	if (C1) {
-		for (i=0; i< M; i++)
+		for (i=0; i< rows; i++)
 			delete C1[i];
 		delete[] C1;
 	}
 
 	if (A) {
-		for (i=0; i < M ;i++)
+		for (i=0; i < rows ;i++)
 			delete []A[i];
 		delete []A;
 	}
 	if (Abak) {
-		for (i=0; i < M ;i++)
+		for (i=0; i < rows ;i++)
 			delete []Abak[i];
 		delete []Abak;
 	}
@@ -1049,15 +1074,14 @@ Generators::~Generators() {
 	//delete[] R;
 	delete[] isi;
 	delete[] degree;
+	delete[] gauss_HI;
+	delete[] gauss_LOW;
 }
 
-/* section 5.7.2 */
+/* section 5.7.2 — branchless via precomputed 256x256 table */
 unsigned char octmul(unsigned char u, unsigned char v)
 {
-	if (u == 0 || v == 0) return 0;
-	if (v == 1) return u;
-	if (u == 1) return v;
-	return OCT_EXP[OCT_LOG[u] + OCT_LOG[v]];
+	return OCT_MUL[u][v];
 }
 
 unsigned char octdiv(unsigned char u, unsigned char v)
