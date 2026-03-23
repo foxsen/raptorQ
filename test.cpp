@@ -463,6 +463,270 @@ void test_roundtrip_K512() {
     ASSERT(roundtrip(512, 4, 12, lost, 5));
 }
 
+/* ── Error handling tests ──────────────────────────────────── */
+
+void test_decode_insufficient_symbols() {
+    /* overhead < nlost means not enough symbols to decode */
+    int K = 8, T = 4, overhead = 2, nlost = 4;
+    int i, j;
+
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)((i * 7 + j * 3) & 0xFF);
+    }
+
+    Encoder *enc = new Encoder();
+    enc->init(K, T);
+    Symbol **repairs = enc->encode(source, overhead);
+    ASSERT(repairs != NULL);
+
+    /* build received: drop nlost source symbols, add only overhead repairs */
+    int n = 0;
+    int max_recv = K + overhead;
+    char **received = new char*[max_recv];
+    int *esi = new int[max_recv];
+
+    for (i = nlost; i < K; i++) {
+        received[n] = new char[T];
+        memcpy(received[n], source[i], T);
+        esi[n] = i;
+        n++;
+    }
+    for (i = 0; i < overhead; i++) {
+        received[n] = new char[T];
+        memcpy(received[n], repairs[i]->data, T);
+        esi[n] = K + i;
+        n++;
+        delete repairs[i];
+    }
+    delete[] repairs;
+    delete enc;
+
+    /* n = K - nlost + overhead = 8 - 4 + 2 = 6 < K, decode should fail */
+    ASSERT(n < K);
+
+    Decoder *dec = new Decoder();
+    dec->init(K, T);
+    Symbol **result = dec->decode(received, n, esi);
+    ASSERT(result == NULL);
+    delete dec;
+
+    for (i = 0; i < n; i++)
+        delete[] received[i];
+    delete[] received;
+    delete[] esi;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+void test_roundtrip_fails_insufficient_overhead() {
+    /* roundtrip helper should return false when overhead < nlost */
+    int lost[] = {0, 1, 2, 3, 4};
+    ASSERT(!roundtrip(8, 4, 2, lost, 5));
+}
+
+void test_encoder_init_K_too_large() {
+    Encoder *enc = new Encoder();
+    ASSERT(!enc->init(56404, 4));
+    delete enc;
+}
+
+void test_encoder_init_K_negative() {
+    Encoder *enc = new Encoder();
+    ASSERT(!enc->init(-1, 4));
+    delete enc;
+}
+
+void test_decoder_init_invalid_K() {
+    Decoder *dec = new Decoder();
+    ASSERT(!dec->init(0, 4));
+    delete dec;
+}
+
+void test_decoder_init_K_too_large() {
+    Decoder *dec = new Decoder();
+    ASSERT(!dec->init(56404, 4));
+    delete dec;
+}
+
+void test_recover_invalid_esi() {
+    /* recover(x) with x >= K should return NULL */
+    int K = 8, T = 4;
+
+    /* set up a valid encode-decode first */
+    int lost[] = {0};
+    int i, j;
+
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)(i + j);
+    }
+
+    Encoder *enc = new Encoder();
+    enc->init(K, T);
+    Symbol **repairs = enc->encode(source, 4);
+    ASSERT(repairs != NULL);
+
+    int n = 0;
+    int max_recv = K + 4;
+    char **received = new char*[max_recv];
+    int *esi = new int[max_recv];
+
+    for (i = 1; i < K; i++) {
+        received[n] = new char[T];
+        memcpy(received[n], source[i], T);
+        esi[n] = i;
+        n++;
+    }
+    for (i = 0; i < 4; i++) {
+        received[n] = new char[T];
+        memcpy(received[n], repairs[i]->data, T);
+        esi[n] = K + i;
+        n++;
+        delete repairs[i];
+    }
+    delete[] repairs;
+    delete enc;
+
+    Decoder *dec = new Decoder();
+    dec->init(K, T);
+    dec->decode(received, n, esi);
+
+    /* recover with x == K (out of range) should return NULL */
+    Symbol *s = dec->recover(K);
+    ASSERT(s == NULL);
+    /* recover with x == K+10 should also return NULL */
+    s = dec->recover(K + 10);
+    ASSERT(s == NULL);
+    /* valid recover should succeed */
+    s = dec->recover(0);
+    ASSERT(s != NULL);
+    delete s;
+
+    delete dec;
+    for (i = 0; i < n; i++)
+        delete[] received[i];
+    delete[] received;
+    delete[] esi;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+void test_encoder_init_boundary_K() {
+    /* K=1 (minimum valid) should succeed */
+    Encoder *enc1 = new Encoder();
+    ASSERT(enc1->init(1, 4));
+    delete enc1;
+
+    /* K=56403 (maximum valid) should succeed */
+    Encoder *enc2 = new Encoder();
+    ASSERT(enc2->init(56403, 4));
+    delete enc2;
+}
+
+void test_decode_all_lost() {
+    /* all source symbols lost, only overhead repair symbols available
+       overhead == K should still work (enough symbols) */
+    int K = 4, T = 4, overhead = K;
+    int i, j;
+
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)((i * 5 + j) & 0xFF);
+    }
+
+    Encoder *enc = new Encoder();
+    enc->init(K, T);
+    Symbol **repairs = enc->encode(source, overhead);
+    ASSERT(repairs != NULL);
+
+    /* received: only repair symbols, no source symbols */
+    char **received = new char*[overhead];
+    int *esi = new int[overhead];
+    for (i = 0; i < overhead; i++) {
+        received[i] = new char[T];
+        memcpy(received[i], repairs[i]->data, T);
+        esi[i] = K + i;
+        delete repairs[i];
+    }
+    delete[] repairs;
+    delete enc;
+
+    Decoder *dec = new Decoder();
+    dec->init(K, T);
+    Symbol **result = dec->decode(received, overhead, esi);
+    ASSERT(result != NULL);
+
+    /* verify all recovered symbols */
+    for (i = 0; i < K; i++) {
+        Symbol *s = dec->recover(i);
+        ASSERT(s != NULL);
+        ASSERT(memcmp(s->data, source[i], T) == 0);
+        delete s;
+    }
+
+    delete dec;
+    for (i = 0; i < overhead; i++)
+        delete[] received[i];
+    delete[] received;
+    delete[] esi;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
+void test_decode_all_lost_insufficient() {
+    /* all K source symbols lost, but fewer than K repair symbols */
+    int K = 8, T = 4, overhead = 4;
+    int i, j;
+
+    char **source = new char*[K];
+    for (i = 0; i < K; i++) {
+        source[i] = new char[T];
+        for (j = 0; j < T; j++)
+            source[i][j] = (char)(i + j);
+    }
+
+    Encoder *enc = new Encoder();
+    enc->init(K, T);
+    Symbol **repairs = enc->encode(source, overhead);
+    ASSERT(repairs != NULL);
+
+    /* received: only 4 repair symbols, need 8 */
+    char **received = new char*[overhead];
+    int *esi = new int[overhead];
+    for (i = 0; i < overhead; i++) {
+        received[i] = new char[T];
+        memcpy(received[i], repairs[i]->data, T);
+        esi[i] = K + i;
+        delete repairs[i];
+    }
+    delete[] repairs;
+    delete enc;
+
+    Decoder *dec = new Decoder();
+    dec->init(K, T);
+    Symbol **result = dec->decode(received, overhead, esi);
+    ASSERT(result == NULL);
+
+    delete dec;
+    for (i = 0; i < overhead; i++)
+        delete[] received[i];
+    delete[] received;
+    delete[] esi;
+    for (i = 0; i < K; i++)
+        delete[] source[i];
+    delete[] source;
+}
+
 /* ── Bandwidth / throughput tests ──────────────────────────── */
 
 static double now_sec() {
@@ -750,7 +1014,7 @@ void test_bandwidth_decode_medium() {
 void test_bandwidth_decode_large() {
     bench_decode(100, 256, 15, 10, 50);
     bench_decode(100, 1024, 15, 10, 20);
-    bench_decode(256, 1024, 20, 25, 10);
+    bench_decode(256, 1024, 30, 25, 10);
 }
 
 void test_bandwidth_stream_small() {
@@ -769,7 +1033,7 @@ void test_bandwidth_stream_medium() {
 void test_bandwidth_stream_large() {
     /* 1MB stream with larger blocks */
     bench_stream(100, 1024, 15, 10, 1024);
-    bench_stream(256, 1024, 20, 25, 1024);
+    bench_stream(256, 1024, 30, 25, 1024);
 }
 
 /* ── Main ──────────────────────────────────────────────────── */
@@ -822,6 +1086,18 @@ int main()
     TEST(test_roundtrip_K50);
     TEST(test_roundtrip_K100);
     TEST(test_roundtrip_K512);
+
+    cout << endl << "=== Error handling ===" << endl;
+    TEST(test_decode_insufficient_symbols);
+    TEST(test_roundtrip_fails_insufficient_overhead);
+    TEST(test_encoder_init_K_too_large);
+    TEST(test_encoder_init_K_negative);
+    TEST(test_decoder_init_invalid_K);
+    TEST(test_decoder_init_K_too_large);
+    TEST(test_recover_invalid_esi);
+    TEST(test_encoder_init_boundary_K);
+    TEST(test_decode_all_lost);
+    TEST(test_decode_all_lost_insufficient);
 
     cout << endl << "=== Bandwidth tests ===" << endl;
     TEST(test_bandwidth_encode_small);

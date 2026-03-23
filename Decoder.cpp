@@ -19,10 +19,9 @@ bool Decoder::init(int K, int T) {
 
 Symbol** Decoder::decode(char **source, int _N, int *esi)
 {
-	Symbol **s;
-
-	gen->prepare(source,_N,esi);
-	s = gen->generate_intermediates();
+	if (!gen->prepare(source, _N, esi))
+		return NULL;
+	Symbol **s = gen->generate_intermediates();
 	if (!s) return NULL;
 	return s;
 }

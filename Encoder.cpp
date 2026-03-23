@@ -14,10 +14,9 @@ bool Encoder::init(int K,int T) {
 }
 
 Symbol** Encoder::encode(char **source, int overhead) {
-	Symbol **s;
-
-	gen->prepare(source,gen->getK(),NULL);
-	s = gen->generate_intermediates();
+	if (!gen->prepare(source, gen->getK(), NULL))
+		return NULL;
+	Symbol **s = gen->generate_intermediates();
 	if (!s) return NULL;
 	return gen->generate_repairs(overhead);
 }
